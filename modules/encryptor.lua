@@ -9,7 +9,7 @@
 
 ---------------------------------------------------------------------------------------------------------------------------]]--
 
-local EncryptionModule = {}
+local Encryptor = {}
 
 -------------------------------------------------------------------------------------------------------------------------------
 
@@ -21,17 +21,9 @@ local function stringToBytes(str)
 	return bytes
 end
 
-local function bytesToString(bytes)
-	local chars = {}
-	for i, b in ipairs(bytes) do
-		chars[i] = string.char(b)
-	end
-	return table.concat(chars)
-end
-
 -------------------------------------------------------------------------------------------------------------------------------
 
-function EncryptionModule.caesarEncrypt(text, shift)
+function Encryptor.caesarEncrypt(text, shift)
 	shift = shift % 26
 	local result = {}
 	for i = 1, #text do
@@ -45,10 +37,6 @@ function EncryptionModule.caesarEncrypt(text, shift)
 		end
 	end
 	return table.concat(result)
-end
-
-function EncryptionModule.caesarDecrypt(text, shift)
-	return EncryptionModule.caesarEncrypt(text, 26 - (shift % 26))
 end
 
 -------------------------------------------------------------------------------------------------------------------------------
@@ -76,7 +64,7 @@ local function buildKeywordAlphabet(keyword)
 	return keyAlpha
 end
 
-function EncryptionModule.keywordEncrypt(text, keyword)
+function Encryptor.keywordEncrypt(text, keyword)
 	local keyAlpha = buildKeywordAlphabet(keyword)
 	local result = {}
 	for i = 1, #text do
@@ -94,38 +82,12 @@ function EncryptionModule.keywordEncrypt(text, keyword)
 	return table.concat(result)
 end
 
-function EncryptionModule.keywordDecrypt(text, keyword)
-	local keyAlpha = buildKeywordAlphabet(keyword)
-	local reverseMap = {}
-	for i, c in ipairs(keyAlpha) do
-		reverseMap[c] = string.char(64 + i)
-		reverseMap[c:lower()] = string.char(96 + i)
-	end
-	local result = {}
-	for i = 1, #text do
-		local c = text:sub(i, i)
-		result[i] = reverseMap[c] or c
-	end
-	return table.concat(result)
-end
-
 --[[---------------------------------------------------------------------------------------------------------------------------
 
-function EncryptionModule.toHex(text)
+function Encryptor.toHex(text)
 	local result = {}
 	for i = 1, #text do
 		result[i] = string.format("%02x", string.byte(text, i))
-	end
-	return table.concat(result)
-end
-
-function EncryptionModule.fromHex(hex)
-	local result = {}
-	for i = 1, #hex, 2 do
-		local byte = tonumber(hex:sub(i, i+1), 16)
-		if byte then
-			table.insert(result, string.char(byte))
-		end
 	end
 	return table.concat(result)
 end
@@ -134,7 +96,7 @@ end
 
 local B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-function EncryptionModule.toBase64(text)
+function Encryptor.toBase64(text)
 	local result = {}
 	local bytes = stringToBytes(text)
 	local i = 1
@@ -171,59 +133,18 @@ function EncryptionModule.toBase64(text)
 	return table.concat(result)
 end
 
-function EncryptionModule.fromBase64(b64)
-	local lookup = {}
-	for i = 1, #B64_CHARS do
-		lookup[B64_CHARS:sub(i,i)] = i - 1
-	end
-
-	local result = {}
-	local i = 1
-	while i <= #b64 do
-		local c1 = lookup[b64:sub(i,i)] or 0
-		local c2 = lookup[b64:sub(i+1,i+1)] or 0
-		local c3 = lookup[b64:sub(i+2,i+2)]
-		local c4 = lookup[b64:sub(i+3,i+3)]
-
-		local b1 = c1 * 4 + math.floor(c2 / 16)
-		table.insert(result, string.char(b1))
-
-		if b64:sub(i+2,i+2) ~= "=" and c3 then
-			local b2 = (c2 % 16) * 16 + math.floor(c3 / 4)
-			table.insert(result, string.char(b2))
-		end
-
-		if b64:sub(i+3,i+3) ~= "=" and c4 then
-			local b3 = (c3 % 4) * 64 + c4
-			table.insert(result, string.char(b3))
-		end
-
-		i = i + 4
-	end
-
-	return table.concat(result)
-end
-
 -------------------------------------------------------------------------------------------------------------------------------
 
-function EncryptionModule.encrypt(plaintext, keyword, caesarShift)
-	local step1 = EncryptionModule.keywordEncrypt(plaintext, keyword)
-	local step2 = EncryptionModule.caesarEncrypt(step1, caesarShift)
-	local step3 = EncryptionModule.toBase64(step2)
-  
-	return step3
-end
-
-function EncryptionModule.decrypt(ciphertext, keyword, caesarShift)
-	local step1 = EncryptionModule.fromBase64(ciphertext)
-	local step2 = EncryptionModule.caesarDecrypt(step1, caesarShift)
-	local step3 = EncryptionModule.keywordDecrypt(step2, keyword)
+function Encryptor.encrypt(plaintext, keyword, caesarShift)
+	local step1 = Encryptor.keywordEncrypt(plaintext, keyword)
+	local step2 = Encryptor.caesarEncrypt(step1, caesarShift)
+	local step3 = Encryptor.toBase64(step2)
   
 	return step3
 end
 
 -------------------------------------------------------------------------------------------------------------------------------
 
-return EncryptionModule
+return Encryptor
 
 -------------------------------------------------------------------------------------------------------------------------------
