@@ -1,3 +1,16 @@
+--[[---------------------------------------------------------------------------------------------------------------------------
+    ______                        _   __           _                 
+   /_  __/__  ____ _____ ___     / | / /___  _  __(_)___  __  _______
+    / / / _ \/ __ `/ __ `__ \   /  |/ / __ \| |/_/ / __ \/ / / / ___/
+   / / /  __/ /_/ / / / / / /  / /|  / /_/ />  </ / /_/ / /_/ (__  ) 
+  /_/  \___/\__,_/_/ /_/ /_/  /_/ |_/\____/_/|_/_/\____/\__,_/____/  
+
+  Made by unable | RegSec script refiner
+
+---------------------------------------------------------------------------------------------------------------------------]]--
+
+
+
 -------------------------------------------------------------------------------------------------------------------------------
 
 --- Split a string into a table of lines (keeps empty lines).
@@ -63,49 +76,60 @@ local function removeTrailingWhitespace(lines: {string}): {string}
 end
 
 -- ════════════════════════════════════════════════════════════
---  Pass 2 – Normalise indentation (mixed tabs+spaces → spaces)
+--  Pass 2 – Enforce tab indentation (spaces/mixed → tabs)
+--           Every 4 spaces of indent = 1 tab. Partial-space
+--           remainders (1-3 spaces) are rounded up to a tab.
 -- ════════════════════════════════════════════════════════════
 
 local function normaliseIndentation(lines: {string}): {string}
-    -- Detect dominant style: count lines that start with a tab vs lines that
-    -- start with spaces. Whichever wins becomes the canonical style.
-    local tabLines, spaceLines = 0, 0
+    -- If every indented line already starts with a tab, nothing to do.
+    local hasSpaceIndent = false
     for _, line in ipairs(lines) do
-        if line:match("^\t") then
-            tabLines += 1
-        elseif line:match("^ ") then
-            spaceLines += 1
+        if line:match("^ ") then
+            hasSpaceIndent = true
+            break
         end
     end
-
-    -- If the file is already purely one style, do nothing.
-    if tabLines == 0 or spaceLines == 0 then
+    if not hasSpaceIndent then
         return lines
     end
 
-    -- Mixed file → convert everything to 4-space indentation.
+    -- Convert all leading whitespace to tabs (4 spaces = 1 tab).
     local out = {}
     for _, line in ipairs(lines) do
         local ws = leadingWS(line)
         local rest = line:sub(#ws + 1)
-        local width = indentWidth(ws)
-        local newWS = string.rep(" ", width)
+        local width = indentWidth(ws)          -- total spaces-equivalent
+        local tabCount = math.ceil(width / 4)  -- round up so nothing is lost
+        local newWS = string.rep("\t", tabCount)
         table.insert(out, newWS .. rest)
     end
     return out
 end
 
--------------------------------------------------------------------------------------------------------------------------------
+-- ════════════════════════════════════════════════════════════
+--  Pass 3 – Remove bare scope pyramids  (do … end)
+--           A "do…end" block is redundant when it contains no
+--           `break`, `continue`, `goto`, or `return` and no
+--           labels, and when nothing it declares is referenced
+--           outside its own block.
+--           Strategy: remove lone `do` / matching `end` lines
+--           whose only purpose is to open a new scope.
+-- ════════════════════════════════════════════════════════════
 
--- remove bare scope pyramids (do ... end)
+--- Very small Luau keyword tracker – not a full parser, but handles the
+--- common pyramid pattern produced by nesting if/for/while/do blocks.
 local function removeScopePyramids(lines: {string}): {string}
-    -- mark indices of 'do' lines that are bare scope openers
+    -- Mark indices of `do` lines that are bare scope openers.
+    -- A bare `do` line: the stripped content is exactly "do" (possibly with
+    -- a trailing comment).
     local function isBareDoLine(line: string): boolean
         local code = stripLineComment(line):match("^%s*(.-)%s*$") or ""
         return code == "do"
     end
 
-    -- returns the line index of the matching end, or nil
+    -- We need to find the matching `end` for a `do` at a given line.
+    -- Returns the line index of the matching end, or nil.
     local function findMatchingEnd(startIdx: number): number?
         local depth = 0
         for i = startIdx, #lines do
@@ -125,18 +149,22 @@ local function removeScopePyramids(lines: {string}): {string}
                     return i
                 end
             end
-            -- 'until' closes a repeat block
+            -- `until` closes a repeat block
             if code:match("^until ") or code:match("^until$") then
                 depth -= 1
                 if depth == 0 then
-                    return i -- wont be 'end' but the block is closed
+                    return i -- won't be `end` but the block is closed
                 end
             end
         end
         return nil
     end
 
-    -- collect all bare-do indices and their matching ends
+    -- Collect all bare-do indices and their matching ends.
+    -- Only remove if:
+    --   1. The block contains no `break`, `continue`, `goto`, `return`, or labels.
+    --   2. No `local` variable declared inside is referenced after the end line.
+    --      (We approximate this with a name scan – conservative.)
     local removals: {[number]: boolean} = {}
 
     local i = 1
@@ -144,7 +172,7 @@ local function removeScopePyramids(lines: {string}): {string}
         if isBareDoLine(lines[i]) then
             local endIdx = findMatchingEnd(i)
             if endIdx then
-                -- check for control-flow inside the block
+                -- Check for control-flow inside the block
                 local hasControlFlow = false
                 local innerLocals: {string} = {}
                 for j = i + 1, endIdx - 1 do
@@ -157,7 +185,7 @@ local function removeScopePyramids(lines: {string}): {string}
                         hasControlFlow = true
                         break
                     end
-                    -- collect declared names
+                    -- Collect declared names
                     for name in code:gmatch("local%s+([%a_][%w_,%s]-)%s*[=%n]") do
                         for n in name:gmatch("[%a_][%w_]*") do
                             table.insert(innerLocals, n)
@@ -166,7 +194,7 @@ local function removeScopePyramids(lines: {string}): {string}
                 end
 
                 if not hasControlFlow then
-                    -- check if any inner local is referenced after endIdx
+                    -- Check if any inner local is referenced after endIdx
                     local escapesScope = false
                     for _, name in ipairs(innerLocals) do
                         for j = endIdx + 1, #lines do
@@ -188,16 +216,16 @@ local function removeScopePyramids(lines: {string}): {string}
         i += 1
     end
 
-    -- rebuild without removed lines and de-indent the block contents
+    -- Rebuild without removed lines and de-indent the block contents.
     local out = {}
-    -- for proper de-indent, we need to know the indent of removed do lines
+    -- For proper de-indent we need to know the indent of removed do-lines.
     local doIndents: {[number]: number} = {}
     for idx in pairs(removals) do
         local ws = leadingWS(lines[idx])
         doIndents[idx] = #ws
     end
 
-    -- build a set of (startDo -> endDo) ranges for de-indenting inner lines
+    -- Build a set of (startDo → endDo) ranges for de-indenting inner lines.
     local ranges: {{number}} = {}
     local doStack: {number} = {}
     for idx = 1, #lines do
@@ -205,7 +233,7 @@ local function removeScopePyramids(lines: {string}): {string}
             if lines[idx]:match("^%s*do%s*$") or lines[idx]:match("^%s*do%-%-") then
                 table.insert(doStack, idx)
             else
-                -- this is an 'end' line
+                -- This is an `end` line
                 local startDo = table.remove(doStack)
                 if startDo then
                     table.insert(ranges, {startDo, idx})
@@ -214,12 +242,13 @@ local function removeScopePyramids(lines: {string}): {string}
         end
     end
 
-    -- for each line, determine if its inside a removed do..end range
+    -- For each line, determine if it's inside a removed do..end range.
+    -- Returns number of tab levels to remove.
     local function getDeindent(lineIdx: number): number
         local amount = 0
         for _, r in ipairs(ranges) do
             if lineIdx > r[1] and lineIdx < r[2] then
-                amount += 4 -- one level
+                amount += 1 -- one tab level per removed do..end
             end
         end
         return amount
@@ -231,8 +260,9 @@ local function removeScopePyramids(lines: {string}): {string}
             if deindent > 0 then
                 local ws = leadingWS(line)
                 local rest = line:sub(#ws + 1)
-                local newWidth = math.max(0, #ws - deindent)
-                table.insert(out, string.rep(" ", newWidth) .. rest)
+                -- ws may be tabs or spaces; convert to tab-count then subtract
+                local tabCount = math.max(0, math.ceil(indentWidth(ws) / 4) - deindent)
+                table.insert(out, string.rep("\t", tabCount) .. rest)
             else
                 table.insert(out, line)
             end
@@ -242,25 +272,32 @@ local function removeScopePyramids(lines: {string}): {string}
     return out
 end
 
--------------------------------------------------------------------------------------------------------------------------------
+-- ════════════════════════════════════════════════════════════
+--  Pass 4 – Remove unused local variables
+--           A local is "unused" if it is declared but never
+--           read anywhere in the rest of the source.
+--           We handle: `local x`, `local x = …`, and
+--           `local x, y = …` (partial removal not attempted –
+--           multi-assignment lines are only removed when ALL
+--           names are unused).
+-- ════════════════════════════════════════════════════════════
 
--- remove unused local variables
 local function removeUnusedLocals(lines: {string}): {string}
     local source = joinLines(lines)
 
-    -- collect all 'local <names>' declarations with their line numbers
+    -- Collect all `local <names>` declarations with their line numbers.
     type DeclInfo = {names: {string}, lineIdx: number, rawLine: string}
     local decls: {DeclInfo} = {}
 
     for i, line in ipairs(lines) do
         if isComment(line) then continue end
-        -- match 'local name1, name2, etc...'
+        -- Match `local name1, name2, ...`
         local nameList = line:match("^%s*local%s+([%a_][%w_%s,]*)[=%s\n]")
                       or line:match("^%s*local%s+([%a_][%w_%s,]*)$")
         if nameList then
             local names = {}
             for n in nameList:gmatch("[%a_][%w_]*") do
-                -- skip luau keywords that can follow 'local'
+                -- Skip Luau keywords that can follow `local`
                 if n ~= "function" then
                     table.insert(names, n)
                 end
@@ -271,13 +308,14 @@ local function removeUnusedLocals(lines: {string}): {string}
         end
     end
 
-    -- for each declared name, check if it appears anywhere other than its own declaration line
+    -- For each declared name, check if it appears anywhere *other* than its
+    -- own declaration line.
     local removeLine: {[number]: boolean} = {}
 
     for _, decl in ipairs(decls) do
         local allUnused = true
         for _, name in ipairs(decl.names) do
-            -- search every line except the declaration line itself
+            -- Search every line except the declaration line itself.
             local used = false
             for i, line in ipairs(lines) do
                 if i == decl.lineIdx then continue end
@@ -306,9 +344,22 @@ local function removeUnusedLocals(lines: {string}): {string}
     return out
 end
 
--------------------------------------------------------------------------------------------------------------------------------
+-- ════════════════════════════════════════════════════════════
+--  Pass 5 – Merge double if-statements
+--           Pattern:
+--               if A then
+--                   if B then
+--                       …body…
+--                   end
+--               end
+--           becomes:
+--               if A and B then
+--                   …body…
+--               end
+--           Only collapses when the outer if has exactly ONE
+--           branch (the inner if) and no else/elseif.
+-- ════════════════════════════════════════════════════════════
 
--- merge double 'if' statemts
 local function mergeDoubleIfs(lines: {string}): {string}
     local function trimCode(line: string): string
         return (stripLineComment(line):match("^%s*(.-)%s*$") or "")
@@ -318,7 +369,8 @@ local function mergeDoubleIfs(lines: {string}): {string}
         return line:match("^%s*if%s+(.+)%s+then%s*$")
     end
 
-    -- find the line index of the 'end' that closes the block starting at 'startLine' (which is an 'if ...' line)
+    -- Find the line index of the `end` that closes the block starting at
+    -- `startLine` (which is an `if …` line).
     local function findBlockEnd(startIdx: number): number?
         local depth = 0
         for i = startIdx, #lines do
@@ -338,7 +390,8 @@ local function mergeDoubleIfs(lines: {string}): {string}
     end
 
     local skip: {[number]: boolean} = {}
-    local merges: {[number]: {outerCond: string, innerCond: string, outerEnd: number, innerEnd: number}} = {}
+    local merges: {[number]: {outerCond: string, innerCond: string,
+                              outerEnd: number, innerEnd: number}} = {}
 
     local i = 1
     while i <= #lines do
@@ -348,9 +401,9 @@ local function mergeDoubleIfs(lines: {string}): {string}
         if outerCond then
             local outerEnd = findBlockEnd(i)
             if outerEnd then
-                -- the body is lines[i + 1 .. outerEnd-1]
-                -- it must consist of exactly one inner 'if' (and its body + end)
-                -- find first non-blank body line
+                -- The body is lines[i+1 .. outerEnd-1].
+                -- It must consist of exactly one inner `if` (and its body + end).
+                -- Find first non-blank body line.
                 local firstBodyIdx: number? = nil
                 for j = i + 1, outerEnd - 1 do
                     if not isBlank(lines[j]) and not isComment(lines[j]) then
@@ -364,7 +417,7 @@ local function mergeDoubleIfs(lines: {string}): {string}
                     if innerCond then
                         local innerEnd = findBlockEnd(firstBodyIdx)
                         if innerEnd and innerEnd == outerEnd - 1 then
-                            -- check theres no else / elseif in outer OR inner block
+                            -- Check there's no else/elseif in outer OR inner block.
                             local hasElse = false
                             for j = i + 1, outerEnd - 1 do
                                 local code = trimCode(lines[j])
@@ -406,11 +459,11 @@ local function mergeDoubleIfs(lines: {string}): {string}
     while i <= #lines do
         local m = merges[i]
         if m then
-            -- emit merged if line with de-indented body
+            -- Emit merged if line with de-indented body.
             local indentStr = leadingWS(lines[i])
             table.insert(out, indentStr .. "if " .. m.outerCond .. " and " .. m.innerCond .. " then")
-            -- de-indent body lines (between firstBodyIdx + 1 and innerEnd - 1)
-            -- find firstBodyIdx again
+            -- De-indent body lines (between firstBodyIdx+1 and innerEnd-1).
+            -- Find firstBodyIdx again.
             local firstBodyIdx = 0
             for j = i + 1, m.outerEnd - 1 do
                 if not isBlank(lines[j]) and not isComment(lines[j]) then
@@ -420,8 +473,8 @@ local function mergeDoubleIfs(lines: {string}): {string}
             for j = firstBodyIdx + 1, m.innerEnd - 1 do
                 local ws = leadingWS(lines[j])
                 local rest = lines[j]:sub(#ws + 1)
-                local newWidth = math.max(0, #ws - 4)
-                table.insert(out, string.rep(" ", newWidth) .. rest)
+                local tabCount = math.max(0, math.ceil(indentWidth(ws) / 4) - 1)
+                table.insert(out, string.rep("\t", tabCount) .. rest)
             end
             table.insert(out, indentStr .. "end")
             i = m.outerEnd + 1
@@ -435,15 +488,19 @@ local function mergeDoubleIfs(lines: {string}): {string}
     return out
 end
 
--------------------------------------------------------------------------------------------------------------------------------
+-- ════════════════════════════════════════════════════════════
+--  Pass 6 – Detect variable shadowing and insert comments
+--           When a `local x` is declared inside a scope and
+--           an outer scope already has `local x`, we leave
+--           the code unchanged but prepend a comment.
+-- ════════════════════════════════════════════════════════════
 
 local function annotateShadowing(lines: {string}): {string}
-    -- we track scopes as a stack of name sets
-    -- blocks opened by: if / then, for, while, do, function, repeat
-    -- blocks closed by: end, until
-  
-    type Scope = {[string]: number} -- name -> line where declared
-    local scopeStack: {Scope} = {{}} -- start with one global scope
+    -- We track scopes as a stack of name-sets.
+    -- Blocks opened by: if/then, for, while, do, function, repeat
+    -- Blocks closed by: end, until
+    type Scope = {[string]: number}  -- name → line where declared
+    local scopeStack: {Scope} = {{}}  -- start with one global scope
 
     local annotations: {[number]: string} = {}
 
@@ -470,23 +527,23 @@ local function annotateShadowing(lines: {string}): {string}
         end
     end
 
-    -- tiny tokeniser for scope depth tracking
+    -- Tiny tokeniser for scope depth tracking.
     local blockOpeners = {
-        ["^%s*if%s"] = false, -- 'if' opens a block but pairs with 'end'
+        ["^%s*if%s"] = false,        -- `if` opens a block but pairs with `end`
         ["^%s*for%s"] = false,
         ["^%s*while%s"] = false,
         ["^%s*do%s*$"] = false,
         ["^%s*do%-%-"] = false,
         ["^%s*function%s"] = false,
         ["^%s*local%s+function%s"] = false,
-        ["=[%s]*function%("] = false, -- anonymous function assigned
+        ["=[%s]*function%("] = false,  -- anonymous function assigned
     }
 
     for i, line in ipairs(lines) do
         if isComment(line) then continue end
         local code = line
 
-        -- check for scope opening patterns
+        -- Check for scope-opening patterns
         local opensScope = false
         for pat in pairs(blockOpeners) do
             if code:match(pat) then
@@ -494,7 +551,7 @@ local function annotateShadowing(lines: {string}): {string}
             end
         end
 
-        -- 'end' and 'until' close a scope
+        -- `end` and `until` close a scope
         local stripped = code:match("^%s*(.-)%s*$") or ""
         if stripped == "end" or stripped:match("^end%-%-") or
            stripped:match("^end%s") or stripped:match("^until") then
@@ -505,7 +562,7 @@ local function annotateShadowing(lines: {string}): {string}
             pushScope()
         end
 
-        -- detect local declarations
+        -- Detect local declarations
         local nameList = code:match("^%s*local%s+([%a_][%w_%s,]*)[=%s\n]")
                       or code:match("^%s*local%s+([%a_][%w_%s,]*)$")
         if nameList then
@@ -536,9 +593,11 @@ local function annotateShadowing(lines: {string}): {string}
     return out
 end
 
--------------------------------------------------------------------------------------------------------------------------------
+-- ════════════════════════════════════════════════════════════
+--  Main entry point
+-- ════════════════════════════════════════════════════════════
 
---- runs all fix passes on 'source' and returns the cleaned source.
+--- Runs all fix passes on `source` and returns the cleaned source.
 local function fixScript(source: string): string
     local lines = splitLines(source)
 
@@ -549,7 +608,7 @@ local function fixScript(source: string): string
     lines = mergeDoubleIfs(lines)
     lines = annotateShadowing(lines)
 
-    -- final pass: strip any trailing blank lines at EOF.
+    -- Final pass: strip any trailing blank lines at EOF.
     while #lines > 0 and isBlank(lines[#lines]) do
         table.remove(lines)
     end
@@ -557,15 +616,17 @@ local function fixScript(source: string): string
     return joinLines(lines)
 end
 
---[[---------------------------------------------------------------------------------------------------------------------------
+-- ════════════════════════════════════════════════════════════
+--  Demo / test  (remove or comment out when using as a module)
+-- ════════════════════════════════════════════════════════════
 
 local testSource = [[
 local unusedVar = 42   
 local anotherUnused = "hello"   
 
 local function greet(name)   
-	local greeting = "Hi"  -- tab indent
-    print(greeting .. ", " .. name)  -- space indent
+    local greeting = "Hi"  -- 4-space indent
+        print(greeting .. ", " .. name)  -- 8-space indent
     do
         do
             print("nested pyramid")
@@ -590,7 +651,5 @@ greet("World")
 
 print("=== FIXED SCRIPT ===")
 print(fixScript(testSource))
-
----------------------------------------------------------------------------------------------------------------------------]]--
 
 return fixScript
