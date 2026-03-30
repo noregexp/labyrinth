@@ -1,8 +1,8 @@
 # info
 
-**encryption and decryption modules** made by **me**
+**script refinement modules** made by **me**
 
-these encryption and decryption modules are used for hiding scripts to ensure their safety and so they dont get dumped and skidded (probably can be easily bypassed but whatever)
+these modules can be used to protect your scripts (though i cant solidify that case as dedicated people can crack them) or refine / beautify them, removing useless and redundant sections in your code
 
 # loadstrings
 
