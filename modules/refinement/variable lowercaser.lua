@@ -13,7 +13,7 @@
 type Token = {
 	kind : string,
 	value : string,
-	pos   : number,
+	pos : number,
 }
 
 local KEYWORDS = {
