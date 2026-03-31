@@ -8,18 +8,27 @@ these modules can be used to protect your scripts (though i cant solidify that c
 
 refiner
 ```lua
-getgenv().RegSec.fixthis = [[print("hi world")]]
+getgenv().RegSec.fixthis = [[
+print("hi world")
+]]
+
 loadstring(game:HttpGet("https://raw.githubusercontent.com/noregexp/labyrinth/refs/heads/main/modules/refinement/fixer.lua"))()
 ```
 
 encryptor
 ```lua
-getgenv().RegSec.encryptthis = [[print("hi world")]]
+getgenv().RegSec.encryptthis = [[
+print("hi world")
+]]
+
 loadstring(game:HttpGet("https://raw.githubusercontent.com/noregexp/labyrinth/refs/heads/main/modules/protection/encryptor.lua"))()
 ```
 
 decryptor
 ```lua
-getgenv().RegSec.decryptthis = [[print("hi world")]]
+getgenv().RegSec.decryptthis = [[
+print("hi world")
+]]
+
 loadstring(game:HttpGet("https://raw.githubusercontent.com/noregexp/labyrinth/refs/heads/main/modules/protection/decryptor.lua"))()
 ```
