@@ -15,6 +15,15 @@ print("hi world")
 loadstring(game:HttpGet("https://raw.githubusercontent.com/noregexp/labyrinth/refs/heads/main/modules/refinement/fixer.lua"))()
 ```
 
+variable lowercaser
+```lua
+getgenv().lowercasethis = [[
+print("hi world")
+]]
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/noregexp/labyrinth/refs/heads/main/modules/refinement/variable%20lowercaser.lua"))()
+```
+
 encryptor
 ```lua
 getgenv().encryptthis = [[
