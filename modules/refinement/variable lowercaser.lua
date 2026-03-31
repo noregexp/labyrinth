@@ -349,6 +349,8 @@ end
 local function lowercaseIds(source: string): string
 	local tokens	= lex(source)
 	local renameMap = collectDeclaredNames(tokens)
+
+	setclipboard(rewrite(tokens, renameMap))
 	return rewrite(tokens, renameMap)
 end
 
