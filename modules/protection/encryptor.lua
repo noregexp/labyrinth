@@ -145,8 +145,8 @@ end
 
 -------------------------------------------------------------------------------------------------------------------------------
 
-if getgenv().RegSec.encryptthis then
-    return Encryptor.encrypt(getgenv().RegSec.encryptthis)
+if getgenv().encryptthis then
+    return Encryptor.encrypt(getgenv().encryptthis)
 else
     return Encryptor
 end
