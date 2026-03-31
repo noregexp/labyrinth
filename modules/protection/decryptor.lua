@@ -135,8 +135,8 @@ end
 
 -------------------------------------------------------------------------------------------------------------------------------
 
-if getgenv().RegSec.decryptthis then
-    return Decryptor.decrypt(getgenv().RegSec.decryptthis)
+if getgenv().decryptthis then
+    return Decryptor.decrypt(getgenv().decryptthis)
 else
     return Decryptor
 end
