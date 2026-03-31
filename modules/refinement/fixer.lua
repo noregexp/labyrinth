@@ -584,7 +584,7 @@ greet("World")
 
 ---------------------------------------------------------------------------------------------------------------------------]]--
 
-if getgenv().RegSec.fixthis then
+if getgenv().fixthis then
     return fixScript(getgenv().RegSec.fixthis)
 else
     return fixScript
