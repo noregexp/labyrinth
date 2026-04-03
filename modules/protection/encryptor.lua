@@ -146,7 +146,7 @@ end
 -------------------------------------------------------------------------------------------------------------------------------
 
 if getgenv().encryptthis then
-    return Encryptor.encrypt(getgenv().encryptthis)
+    return Encryptor.encrypt(getgenv().encryptthis, "clef", 4)
 else
     return Encryptor
 end
